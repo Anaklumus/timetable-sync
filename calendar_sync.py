@@ -1,4 +1,5 @@
 import os.path
+import datetime 
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -22,20 +23,43 @@ def get_service():
             token.write(creds.to_json())
     return build("calendar", "v3", credentials=creds)
 
+DAYS = {
+    "Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3,
+    "Friday": 4, "Saturday": 5, "Sunday": 6,
+}
 
-if __name__ == "__main__":
-    service = get_service()
+
+def first_occurrence(start_date, day_name):
+    """First date on or after start_date that falls on day_name."""
+    offset = (DAYS[day_name] - start_date.weekday()) % 7
+    return start_date + datetime.timedelta(days=offset)
+
+
+def create_recurring_event(service, session, first_date, until_date):
+    first_class = first_occurrence(first_date, session.day).isoformat()
+    until = until_date.strftime("%Y%m%d") + "T235959Z"
+
     event = {
-        "summary": "Test event",
+        "summary": session.course,
+        "location": session.room,
         "start": {
-            "dateTime": "2026-10-10T10:00:00",
+            "dateTime": f"{first_class}T{session.start_time}:00",
             "timeZone": "Asia/Kolkata",
         },
         "end": {
-            "dateTime": "2026-10-10T11:00:00",
+            "dateTime": f"{first_class}T{session.end_time}:00",
             "timeZone": "Asia/Kolkata",
         },
+        "recurrence": [f"RRULE:FREQ=WEEKLY;UNTIL={until}"],
     }
+    return service.events().insert(calendarId="primary", body=event).execute()
 
-    created = service.events().insert(calendarId="primary", body=event).execute()
-    print("Event created:", created.get("htmlLink"))
+if __name__ == "__main__":
+    from parser import sessions
+
+    service = get_service()
+    start = datetime.date(2026, 10, 12)
+    end = datetime.date(2026, 11, 20)
+
+    created = create_recurring_event(service, sessions[0], start, end)
+    print("Created:", created.get("htmlLink"))
