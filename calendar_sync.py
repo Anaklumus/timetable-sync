@@ -1,10 +1,12 @@
 import os.path
 import datetime 
+import hashlib 
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError 
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
@@ -23,6 +25,7 @@ def get_service():
             token.write(creds.to_json())
     return build("calendar", "v3", credentials=creds)
 
+
 DAYS = {
     "Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3,
     "Friday": 4, "Saturday": 5, "Sunday": 6,
@@ -35,6 +38,11 @@ def first_occurrence(start_date, day_name):
     return start_date + datetime.timedelta(days=offset)
 
 
+def make_event_id(session):
+    key = f"{session.course}|{session.day}|{session.start_time}|{session.end_time}"
+    return hashlib.sha1(key.encode()).hexdigest()
+
+
 def create_recurring_event(service, session, first_date, until_date):
     first_class = first_occurrence(first_date, session.day).isoformat()
     until = until_date.strftime("%Y%m%d") + "T235959Z"
@@ -42,6 +50,7 @@ def create_recurring_event(service, session, first_date, until_date):
     event = {
         "summary": session.course,
         "location": session.room,
+        "id": make_event_id(session),
         "start": {
             "dateTime": f"{first_class}T{session.start_time}:00",
             "timeZone": "Asia/Kolkata",
@@ -52,7 +61,13 @@ def create_recurring_event(service, session, first_date, until_date):
         },
         "recurrence": [f"RRULE:FREQ=WEEKLY;UNTIL={until}"],
     }
-    return service.events().insert(calendarId="primary", body=event).execute()
+    try:
+        return service.events().insert(calendarId="primary", body=event).execute()
+    except HttpError as error:
+        if error.resp.status == 409:
+            return None
+        raise
+
 
 if __name__ == "__main__":
     from parser import sessions
@@ -61,5 +76,9 @@ if __name__ == "__main__":
     start = datetime.date(2026, 10, 12)
     end = datetime.date(2026, 11, 20)
 
-    created = create_recurring_event(service, sessions[0], start, end)
-    print("Created:", created.get("htmlLink"))
+    for session in sessions:
+        created = create_recurring_event(service, session, start, end)
+        if created is None:
+            print(f"Skipped (already exists): {session.course} {session.day}")
+        else:
+            print(f"Created: {session.course} {session.day}")
