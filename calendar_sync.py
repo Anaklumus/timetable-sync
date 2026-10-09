@@ -70,15 +70,29 @@ def create_recurring_event(service, session, first_date, until_date):
 
 
 if __name__ == "__main__":
-    from parser import sessions
+    from parser import load_sessions
+    from conflicts import find_conflicts
+
+    sessions = load_sessions("timetable.csv")
+    print(f"Parsed {len(sessions)} classes")
+
+    conflicts = find_conflicts(sessions)
+    print(f"Detected {len(conflicts)} conflicts")
+    if conflicts:
+        for a, b in conflicts:
+            print(f"  CONFLICT: {a.course} and {b.course} on {a.day}")
+        raise SystemExit("Fix conflicts before syncing.")
 
     service = get_service()
     start = datetime.date(2026, 10, 12)
     end = datetime.date(2026, 11, 20)
 
+    created_count = 0
+    skipped_count = 0
     for session in sessions:
-        created = create_recurring_event(service, session, start, end)
-        if created is None:
-            print(f"Skipped (already exists): {session.course} {session.day}")
+        if create_recurring_event(service, session, start, end) is None:
+            skipped_count += 1
         else:
-            print(f"Created: {session.course} {session.day}")
+            created_count += 1
+
+    print(f"Created {created_count} recurring events, skipped {skipped_count} existing")       
